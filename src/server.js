@@ -43,7 +43,7 @@ function validateName(name) {
 
 function isYesAnswer(answer) {
   const lower = String(answer).toLowerCase().trim();
-  const answers = ['yes', 'yep', 'yeah', 'sure', 'true', 'affirmative', 'indeed'];
+  const answers = ['yes', 'yep', 'yeah', 'sure', 'true', 'affirmative', 'indeed', 'correct', 'right'];
   let yes_status = false;
   for (const ans of answers) {
     if (lower.includes(ans)) {
