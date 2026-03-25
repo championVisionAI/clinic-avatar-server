@@ -147,6 +147,6 @@ export function buildQuestionSet(selectedTreatments) {
   return combined;
 }
 
-export const GREETING_1 = `Hello and welcome! I'm your virtual health assistant. I'm going to ask you a series of questions to help gather important health information before your appointment. These questions are part of a routine screening process and are not intended to diagnose or treat any condition. Your answers will be securely collected and shared with a licensed healthcare provider, who will review your information. Please answer each question as accurately and honestly as possible. If you're unsure about anything, just do your best or let me know. This process is simply to ensure your safety and provide the best possible care. Let's get started.`;
-export const GREETING = `Hello and welcome!`
+export const GREETING = `Hello and welcome! I'm your virtual health assistant. I'm going to ask you a series of questions to help gather important health information before your appointment. These questions are part of a routine screening process and are not intended to diagnose or treat any condition. Your answers will be securely collected and shared with a licensed healthcare provider, who will review your information. Please answer each question as accurately and honestly as possible. If you're unsure about anything, just do your best or let me know. This process is simply to ensure your safety and provide the best possible care. Let's get started.`;
+
 export const CLOSING = `Thank you so much for answering all of my questions. Your responses have been collected. Please wait while we connect you with a provider who will go over your information shortly. Have a wonderful day!`;
