@@ -57,59 +57,126 @@ function isYesAnswer(answer) {
 }
 
 // ─── Unified LLM-based validation for ALL questions (7-phase flow support) ────
-async function validateAnswerCompleteness(questionText, answer, questionKey) {
+// Validates answer completeness considering main question + all accumulated follow-up answers
+async function validateAnswerCompleteness(questionText, answer, questionKey, allPreviousAnswers = []) {
   try {
-    const validationPrompt = `You are a medical intake assistant validating patient responses.
+    // Build context from all previous answers for this question
+    let contextStr = '';
+    if (allPreviousAnswers.length > 0) {
+      contextStr = '\n\nPrevious answers in this question:\n';
+      allPreviousAnswers.forEach((prev, idx) => {
+        contextStr += `${idx + 1}. ${prev}\n`;
+      });
+      contextStr += `\nNew answer: ${answer}`;
+    }
+    console.log('Validating answer completeness with context:', { questionText, answer, questionKey, allPreviousAnswers });
+    const validationPrompt = `You are a medical intake assistant validating patient responses. BE STRICT about requiring sufficient information.
 
 Question asked: "${questionText}"
-Patient answered: "${answer}"
+Patient answered: "${answer}"${contextStr}
 
-Your task: Determine if this answer contains all the necessary information to properly record the response.
+Your task: Determine if this answer (combined with all previous answers) contains SUFFICIENT information to properly record the response for a medical provider.
 
 Return a JSON object with this exact structure:
 {
   "validate": true or false,
-  "follow_up": "question here"
+  "follow_up": "question here (only if validate is false)"
 }
 
-RULES:
-- For name questions: Check if a valid first and last name is provided
-- For date questions: Check if a enough date or age is provided
-- For yes/no questions: Check if they clearly said yes/no and for HIGH severity questions, if they provided what was asked about
-- For open-ended: Check if enough, enough info are provided, not need detailed (include vague answers)
-- If validate=true: follow_up should be a confirmation question like "So [extracted_info], is that correct?"
-- If validate=false: follow_up should ask for the missing enough information
+STRICT VALIDATION RULES:
+- For name questions: MUST have both first AND last name explicitly stated
+- For date questions: MUST have specific date (day/month/year) or clear age. Vague dates like "a while ago" NOT acceptable
+- For yes/no with details: YES without specifics = validate: false. Need specific details
+- For medications: MUST have name AND dosage AND frequency
+  * "I take medication" = NOT VALID (need specific names)
+  * "Aspirin" = NOT VALID (need dosage and frequency)
+  * "Aspirin 100mg daily" = VALID
+- For allergies: MUST have specific allergen explicitly named
+  * "I have allergies" = NOT VALID (which allergen?)
+  * "Penicillin allergy" = VALID
+- For medical conditions: MUST name the specific condition, not vague
+  * "Some medical stuff" = NOT VALID
+  * "Mild allergies, high blood pressure" = VALID
+- For surgeries: MUST name the type, not just "surgery"
+  * "I had surgery" = NOT VALID
+  * "Appendectomy in 2020" = VALID
+- CRITICAL: Negative answers ("No", "Don't have", "Never") = validate: true
+- CRITICAL: "I don't know", "I don't remember", "I'm not sure" = validate: true
+- CRITICAL: Refusal to answer = validate: true
+- Garbled with ZERO extractable meaning = validate: false
+- Vague/generic without specifics = validate: false
 
-Examples:
-- Q: "What's your name?" A: "John" → validate: false, follow_up: "Could you also provide your last name?"
-- Q: "What's your name?" A: "John Smith" → validate: true, follow_up: "John Smith, is that correct?"
-- Q: "Are you taking medications?" A: "Yes" → validate: false, follow_up: "What medications are you taking?"
-- Q: "Are you taking medications?" A: "Yes, aspirin 100mg daily" → validate: true, follow_up: "So you're taking aspirin 100mg daily, is that correct?"
+Invalid examples:
+- A: "Some medicine" → validate: false
+- A: "I have allergies" → validate: false
+- A: "Yeah, surgery" → validate: false
+- A: "Maybe something" → validate: false
 
-Return ONLY valid JSON, no other text.`;
+Valid examples:
+- A: "No" → validate: true
+- A: "I don't remember exactly" → validate: true
+- A: "Metformin 500mg twice daily" → validate: true
+- A: "Penicillin causes rash" → validate: true
+
+Return ONLY valid JSON.`;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4.1',
       messages: [{ role: 'user', content: validationPrompt }],
       max_tokens: 200,
-      temperature: 0.2,
+      temperature: 0.1,
     });
-
     const jsonResponse = response.choices[0].message.content.trim();
     const parsed = JSON.parse(jsonResponse);
 
     return {
       isValid: parsed.validate === true,
-      followUp: parsed.follow_up || 'Please provide more details',
+      followUp: parsed.follow_up || null,
     };
   } catch (err) {
     console.error('Answer validation error:', err);
-    // Fallback: basic content check
-    const hasContent = answer && String(answer).trim().length > 2;
+    // Fallback: require meaningful content
+    const hasContent = answer && String(answer).trim().length > 5;
     return {
-      isValid: hasContent,
-      followUp: hasContent ? `Is "${answer}" correct?` : 'Could you please answer the question?',
+      isValid: false,
+      followUp: 'Could you provide more specific details?',
     };
+  }
+}
+
+// ─── Generate creative, varied follow-up questions using LLM ──────────────────
+async function generateCreativeFollowUp(questionText, answer, questionKey, followUpAttempt = 1) {
+  try {
+    let attemptContext = '';
+    if (followUpAttempt > 1) {
+      attemptContext = `\n\nThis is follow-up attempt #${followUpAttempt}. The patient has already tried to answer this. Ask differently this time - use different wording, different approach, or ask about a specific aspect they might have missed.`;
+    }
+
+    const followUpPrompt = `You are a medical intake assistant generating follow-up questions.
+
+Original question: "${questionText}"
+Patient's answer: "${answer}"${attemptContext}
+
+Your task: Generate ONE creative, natural, human-like follow-up question that:
+- Sounds like a real person asking, not robotic
+- Is friendly and conversational, not formal
+- Focuses on getting missing or clarified information
+- Uses varied language (don't repeat the exact original question)
+- Is specific to what they said or to what seems incomplete
+
+Return the follow-up question text ONLY. No JSON, no prefix, just the natural question.`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4.1',
+      messages: [{ role: 'user', content: followUpPrompt }],
+      temperature: 0.7, // Higher temperature for more creative variation
+    });
+
+    return response.choices[0].message.content.trim();
+  } catch (err) {
+    console.error('Follow-up generation error:', err);
+    // Fallback generic follow-up
+    return `Could you tell me a bit more about that?`;
   }
 }
 
@@ -157,19 +224,36 @@ app.get('/api/sessions/:sessionId', (req, res) => {
 });
 
 // ─── REST: Submit an answer and get the next question ────────────────────────
-// 7-PHASE VALIDATION FLOW FOR ALL QUESTIONS:
-// 1) VALIDATE: Check if answer is complete using OpenAI → valid: true/false
-// 2) If invalid (false) → go to PHASE 6 (ask for correct info)
-// 3) If valid (true) → go to PHASE 4 (ask confirmation)
-// 4) CONFIRM: Ask "is this correct?"
-// 5) CHECK CONFIRMATION: If yes → go to PHASE 7 (next question), If no → go to PHASE 6
-// 6) REQUEST INFO: Ask follow-up question → go back to PHASE 1
-// 7) ADVANCE: Move to next question
+// SIMPLIFIED 3-PHASE VALIDATION FLOW (NO CONFIRMATION):
+// 1) VALIDATE: Check if answer (+ all previous follow-ups) is complete → valid: true/false
+//    - If valid → PHASE 7 (advance to next question)
+//    - If not valid → PHASE 6 (ask follow-up)
+// 6) REQUEST INFO: Ask follow-up question (MAX 2 attempts) → accumulate answers and loop back to PHASE 1
+//    - After 2 follow-up attempts, force proceed to PHASE 7
+// 7) ADVANCE: Store answer and move to next question
 app.post('/api/sessions/:sessionId/answer', async (req, res) => {
   const session = sessions.get(req.params.sessionId);
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
   const { answer, rawTranscript } = req.body;
+
+  // ─── SPECIAL CASE: Handle final comments ─────────────────────────────────
+  if (session.state === 'final_comments') {
+    if (answer && answer.trim()) {
+      session.finalComments = {
+        text: answer,
+        timestamp: new Date(),
+      };
+    }
+
+    session.state = 'complete';
+
+    return res.json({
+      state: 'complete',
+      message: CLOSING,
+      summary: buildSummary(session),
+    });
+  }
 
   if (session.currentIndex < 0 || session.currentIndex >= session.questions.length) {
     return res.status(400).json({ error: 'Invalid question index' });
@@ -178,23 +262,50 @@ app.post('/api/sessions/:sessionId/answer', async (req, res) => {
   const currentQ = session.questions[session.currentIndex];
   const questionKey = currentQ.key;
 
-  // ─── PHASE 5: Check if answer is confirming a previous validation ────────
-  if (session.validationState?.[questionKey]?.stage === 'awaiting_confirmation') {
-    const isConfirmed = isYesAnswer(answer);
+  // Initialize validation state for this question if not exists
+  if (!session.validationState) {
+    session.validationState = {};
+  }
+  if (!session.validationState[questionKey]) {
+    session.validationState[questionKey] = {
+      answers: [], // Accumulate all answers (main + follow-ups)
+      rawTranscripts: [],
+      followUpAttempts: 0, // Track follow-up attempts
+    };
+  }
 
-    if (isConfirmed) {
-      // ─── PHASE 7: Answer confirmed, store and advance ────────────────────
+  // Add current answer to accumulated answers
+  session.validationState[questionKey].answers.push(answer);
+  session.validationState[questionKey].rawTranscripts.push(rawTranscript);
+
+  // Combine all accumulated answers for validation
+  const combinedAnswers = session.validationState[questionKey].answers.join(' ');
+
+  // ─── PHASE 1: Validate answer completeness with all accumulated answers ────
+  const validation = await validateAnswerCompleteness(
+    currentQ.text,
+    combinedAnswers,
+    questionKey,
+    session.validationState[questionKey].answers.slice(0, -1) // Previous answers only
+  );
+
+  if (!validation.isValid) {
+    // Check if we've already done 2 follow-up attempts
+    if (session.validationState[questionKey].followUpAttempts >= 2) {
+      // ─── FORCE ADVANCE after 2 follow-up attempts ────────────────────────
+      console.log(`Forcing advance for question ${questionKey} after 2 follow-up attempts`);
+      
       session.answers[questionKey] = {
         question: currentQ.text,
-        answer: session.validationState[questionKey].answer,
-        rawTranscript: session.validationState[questionKey].rawTranscript,
+        answer: combinedAnswers,
+        rawTranscript: session.validationState[questionKey].rawTranscripts.join(' | '),
         timestamp: new Date(),
         validated: true,
+        allResponses: session.validationState[questionKey].answers,
+        forcedAdvance: true, // Mark that we forced advance due to follow-up limit
       };
-      // Clean up validation state
-      delete session.validationState[questionKey];
 
-      // Advance to next question
+      delete session.validationState[questionKey];
       session.currentIndex++;
 
       if (session.currentIndex >= session.questions.length) {
@@ -210,7 +321,7 @@ app.post('/api/sessions/:sessionId/answer', async (req, res) => {
       }
 
       const nextQ = session.questions[session.currentIndex];
-      const conversationalQ = await rephraseQuestion(nextQ.text, answer, session, nextQ.severity);
+      const conversationalQ = await rephraseQuestion(nextQ.text, combinedAnswers, session, nextQ.severity);
 
       return res.json({
         state: 'questioning',
@@ -221,43 +332,24 @@ app.post('/api/sessions/:sessionId/answer', async (req, res) => {
           total: session.questions.length,
         },
       });
-    } else {
-      // ─── PHASE 6: Not confirmed, ask for correct info again ──────────────
-      delete session.validationState[questionKey];
-      
-      return res.json({
-        state: 'questioning',
-        question: session.validationState?.[questionKey]?.followUp || `Let me ask again: ${currentQ.text}`,
-        questionKey,
-        isFollowUp: true,
-        progress: {
-          current: session.currentIndex + 1,
-          total: session.questions.length,
-        },
-      });
     }
-  }
 
-  // ─── PHASE 1: Validate answer completeness ───────────────────────────────
-  const validation = await validateAnswerCompleteness(currentQ.text, answer, questionKey);
-
-  if (!validation.isValid) {
-    // ─── PHASE 6: Store state for follow-up and ask for correct info ────────
-    if (!session.validationState) {
-      session.validationState = {};
-    }
-    session.validationState[questionKey] = {
-      stage: 'awaiting_followup_answer',
-      answer,
-      rawTranscript,
-      followUp: validation.followUp,
-    };
+    // ─── PHASE 6: Answer incomplete, generate creative follow-up ──────────────
+    session.validationState[questionKey].followUpAttempts++;
+    
+    const creativeFollowUp = await generateCreativeFollowUp(
+      currentQ.text,
+      combinedAnswers,
+      questionKey,
+      session.validationState[questionKey].followUpAttempts
+    );
 
     return res.json({
       state: 'questioning',
-      question: validation.followUp,
+      question: creativeFollowUp,
       questionKey,
       isFollowUp: true,
+      followUpAttempt: session.validationState[questionKey].followUpAttempts,
       progress: {
         current: session.currentIndex + 1,
         total: session.questions.length,
@@ -265,23 +357,42 @@ app.post('/api/sessions/:sessionId/answer', async (req, res) => {
     });
   }
 
-  // At this point, validate is true
-  // ─── PHASE 4: Ask for confirmation ───────────────────────────────────────
-  if (!session.validationState) {
-    session.validationState = {};
-  }
-  session.validationState[questionKey] = {
-    stage: 'awaiting_confirmation',
-    answer,
-    rawTranscript,
-    followUp: validation.followUp,
+  // ─── PHASE 7: Answer valid, store and advance to next question ──────────────
+  session.answers[questionKey] = {
+    question: currentQ.text,
+    answer: combinedAnswers,
+    rawTranscript: session.validationState[questionKey].rawTranscripts.join(' | '),
+    timestamp: new Date(),
+    validated: true,
+    allResponses: session.validationState[questionKey].answers, // Track individual responses
+    followUpAttemptsUsed: session.validationState[questionKey].followUpAttempts,
   };
+
+  // Clean up validation state for this question
+  delete session.validationState[questionKey];
+
+  // Advance to next question
+  session.currentIndex++;
+
+  if (session.currentIndex >= session.questions.length) {
+    session.state = 'final_comments';
+    return res.json({
+      state: 'final_comments',
+      question: 'Is there anything else you would like to add or clarify about your health before we wrap up?',
+      progress: {
+        current: session.questions.length,
+        total: session.questions.length,
+      },
+    });
+  }
+
+  const nextQ = session.questions[session.currentIndex];
+  const conversationalQ = await rephraseQuestion(nextQ.text, combinedAnswers, session, nextQ.severity);
 
   return res.json({
     state: 'questioning',
-    question: validation.followUp, // This is the confirmation question
-    questionKey,
-    isConfirmation: true,
+    question: conversationalQ,
+    questionKey: nextQ.key,
     progress: {
       current: session.currentIndex + 1,
       total: session.questions.length,
@@ -457,7 +568,7 @@ RULES:
       : `Ask this question naturally: "${questionText}"`;
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'gpt-4.1',
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: prompt },
