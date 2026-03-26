@@ -149,22 +149,28 @@ async function generateCreativeFollowUp(questionText, answer, questionKey, follo
   try {
     let attemptContext = '';
     if (followUpAttempt > 1) {
-      attemptContext = `\n\nThis is follow-up attempt #${followUpAttempt}. The patient has already tried to answer this. Ask differently this time - use different wording, different approach, or ask about a specific aspect they might have missed.`;
+      attemptContext = `\n\nThis is follow-up attempt #${followUpAttempt}. The patient already answered once. Ask the same thing but in a different way - maybe ask about a specific detail they missed, or rephrase to focus on what's most important. Sound like a real healthcare provider asking a clarifying question.`;
     }
 
-    const followUpPrompt = `You are a medical intake assistant generating follow-up questions.
+    const followUpPrompt = `You are a nurse practitioner asking a clarifying follow-up question.
 
 Original question: "${questionText}"
 Patient's answer: "${answer}"${attemptContext}
 
-Your task: Generate ONE creative, natural, human-like follow-up question that:
-- Sounds like a real person asking, not robotic
-- Is friendly and conversational, not formal
-- Focuses on getting missing or clarified information
-- Uses varied language (don't repeat the exact original question)
-- Is specific to what they said or to what seems incomplete
+Generate ONE natural, conversational follow-up question that:
+- Sounds like how a real nurse would ask (not robotic)
+- Is specific and focuses on what detail or clarity is missing
+- Uses natural language like real healthcare providers in medical calls
+- If first attempt: asks for the missing detail naturally
+- If second+ attempt: asks the same thing differently, maybe focusing on one specific aspect
 
-Return the follow-up question text ONLY. No JSON, no prefix, just the natural question.`;
+Examples of natural follow-ups:
+- "Tell me a bit more about that"
+- "What medication are you taking, and do you know the dosage?"
+- "When did you have that surgery?"
+- "Which specific medication caused the reaction?"
+
+Return ONLY the follow-up question. No prefix, no explanation.`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4.1',
@@ -176,7 +182,7 @@ Return the follow-up question text ONLY. No JSON, no prefix, just the natural qu
   } catch (err) {
     console.error('Follow-up generation error:', err);
     // Fallback generic follow-up
-    return `Could you tell me a bit more about that?`;
+    return `Tell me a bit more about that.`;
   }
 }
 
@@ -539,33 +545,31 @@ wss.on('connection', (ws) => {
 async function rephraseQuestion(questionText, previousAnswer, session, severity = SEVERITY.MEDIUM) {
   try {
     const toneGuidance = {
-      [SEVERITY.LOW]: `You are friendly and conversational. Acknowledge the answer briefly and move forward naturally.
-CRITICAL: DO NOT use acknowledgment phrases like "thank you", "good to know", "sounds good", "glad you mentioned", "appreciate that", "that's helpful", "got it", "cool", or "nice".
-Instead say: "I see", "Understood", "Got that", "I've noted that", or simply transition to the next question.`,
-      [SEVERITY.MEDIUM]: `You are professional and warm. Ask naturally without over-reacting.
-CRITICAL: DO NOT use acknowledgment phrases like "thank you", "good to know", "sounds good", "glad you mentioned", "appreciate that", "that's helpful".
-Instead say: "I see", "Understood", "I've noted that", or transition directly to the next question.`,
-      [SEVERITY.HIGH]: `You are professional and neutral. Do NOT comment on the severity or importance of what was shared.
-CRITICAL: NEVER use phrases like "thank you", "good to know", "glad you mentioned", "sounds good", "appreciate that", "that's helpful", "thanks for sharing".
-CRITICAL: Do NOT use phrases like "approved", "eligible", "qualified", "cleared", "good candidate".
-Instead use: "I've noted that", "I see", "Understood", "Got that", or transition directly to the next question without commentary.
-Keep response brief and factual without emotional validation.`,
+      [SEVERITY.LOW]: `You are friendly and conversational, like a real nurse practitioner.
+Use natural acknowledgments: "OK", "Perfect", "Got you", "I see", "All right", "Got that".
+Keep it warm but professional. Move forward naturally without over-explaining.`,
+      [SEVERITY.MEDIUM]: `You are professional and warm, like a real healthcare provider.
+Use natural acknowledgments: "OK", "Perfect", "Got you", "I got that", "I see", "Understood".
+Be conversational and natural. Transition smoothly to the next question, sometimes explaining why the information helps.`,
+      [SEVERITY.HIGH]: `You are professional and neutral, handling sensitive medical topics carefully.
+Use natural acknowledgments: "OK", "Got that", "I see", "Understood", "I've noted that".
+Do NOT use: "thank you", "good to know", "glad you mentioned", "sounds good", "appreciate that", "approved", "cleared", "qualified".
+Keep it brief and factual. Acknowledge what they said, then move to the next question without judgment or commentary.`,
     };
 
-    const system = `You are a warm, professional medical intake assistant. Your role is to gather accurate health information.
-${toneGuidance[severity] || toneGuidance[SEVERITY.MEDIUM]}
+    const system = `You are a nurse practitioner doing medical clearance intake. You sound natural, warm, and professional - like the real healthcare providers in these transcripts:
+- Acknowledge the patient's answer naturally (not robotic)
+- Ask the next question conversationally and directly
+- One question at a time
+- Keep responses brief and natural (1-2 sentences)
+- Never provide medical advice
+- Sound like a real person, not an AI
 
-RULES:
-- Ask ONE question at a time
-- Never interpret answers clinically
-- Never provide medical advice or commentary
-- Keep it brief and natural — 1-2 sentences max
-- Do not add unnecessary commentary or reactions
-- Transition smoothly to the next question`;
+${toneGuidance[severity] || toneGuidance[SEVERITY.MEDIUM]}`;
 
     const prompt = previousAnswer
-      ? `The patient just answered: "${previousAnswer}". Now ask this next question naturally: "${questionText}"`
-      : `Ask this question naturally: "${questionText}"`;
+      ? `Patient answered: "${previousAnswer}"\nNow naturally acknowledge that and ask this next question: "${questionText}"`
+      : `Ask this question naturally and directly: "${questionText}"`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4.1',

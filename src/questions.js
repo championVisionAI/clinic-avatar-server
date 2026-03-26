@@ -38,10 +38,10 @@ export const GENERAL_QUESTIONS = [
   {
     id: 'g3',
     key: 'prior_treatment',
-    text: 'Have you had this treatment before?',
+    text: 'Is this your first time with this treatment, or have you done it before?',
     severity: SEVERITY.MEDIUM,
     requiresFollowUp: true,
-    followUpQuestion: 'When did you have this treatment, and how many times have you received it?',
+    followUpQuestion: 'Tell me a bit more — when did you have it, and how many times?',
   },
   {
     id: 'g4',
@@ -49,15 +49,15 @@ export const GENERAL_QUESTIONS = [
     text: 'Do you have any allergies or bad reactions to medications or treatments?',
     severity: SEVERITY.HIGH,
     requiresFollowUp: true,
-    followUpQuestion: 'Please describe the allergies or reactions you have had.',
+    followUpQuestion: 'What specific allergen or medication caused the reaction?',
   },
   {
     id: 'g5',
     key: 'medications',
-    text: 'Are you taking any medications right now?',
+    text: 'Are you currently taking any medications?',
     severity: SEVERITY.HIGH,
     requiresFollowUp: true,
-    followUpQuestion: 'What medications are you currently taking? Please list them for me.',
+    followUpQuestion: 'What medication are you taking, and do you know the dosage and how often you take it?',
   },
   {
     id: 'g6',
@@ -65,7 +65,7 @@ export const GENERAL_QUESTIONS = [
     text: 'Do you have any medical conditions or past surgeries?',
     severity: SEVERITY.HIGH,
     requiresFollowUp: true,
-    followUpQuestion: 'Please tell me about your medical conditions or surgeries.',
+    followUpQuestion: 'What conditions do you have, and for surgeries, what type and when did you have them?',
   },
   {
     id: 'g7',
@@ -77,10 +77,10 @@ export const GENERAL_QUESTIONS = [
   {
     id: 'g8',
     key: 'new_health_concerns',
-    text: "Do you have any new or serious health concerns you haven't talked to a doctor about yet?",
+    text: "Do you have any new health issues that you haven't seen a doctor for yet?",
     severity: SEVERITY.HIGH,
     requiresFollowUp: true,
-    followUpQuestion: 'Please describe the health concerns you have.',
+    followUpQuestion: 'What health issues are you experiencing? Please describe them.',
   },
 ];
 
@@ -147,6 +147,6 @@ export function buildQuestionSet(selectedTreatments) {
   return combined;
 }
 
-export const GREETING = `Hello and welcome! I'm your virtual health assistant. I'm going to ask you a series of questions to help gather important health information before your appointment. These questions are part of a routine screening process and are not intended to diagnose or treat any condition. Your answers will be securely collected and shared with a licensed healthcare provider, who will review your information. Please answer each question as accurately and honestly as possible. If you're unsure about anything, just do your best or let me know. This process is simply to ensure your safety and provide the best possible care. Let's get started.`;
+export const GREETING = `Hi, My name is Laura, and I'm a nurse practitioner. I'll be doing your medical clearance screening today. I'm going to ask you a series of questions to make sure everything is safe for your treatment. Your answers are really important and help us provide the best care possible. Please answer as honestly and accurately as you can. If you're not sure about anything, just let me know. This should only take a few minutes. Shall we get started?`;
 
-export const CLOSING = `Thank you so much for answering all of my questions. Your responses have been collected. Please wait while we connect you with a provider who will go over your information shortly. Have a wonderful day!`;
+export const CLOSING = `Thank you so much for answering all my questions. Your responses have been collected. A provider will review your information and go over everything with you. You're all clear to go. Have a wonderful day!`;
